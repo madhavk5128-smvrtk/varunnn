@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SWACHHAM // CYCLE SCANNER</title>
+    <style>
+        body { background: #111; color: #0f0; font-family: monospace; padding: 20px; text-align: center; }
+        button { background: #0f0; color: #000; padding: 15px 30px; font-size: 1.2rem; font-weight: bold; cursor: pointer; border: none; margin: 10px; }
+        #log { text-align: left; background: #000; padding: 15px; height: 300px; overflow-y: auto; border: 1px solid #0f0; margin-top: 20px; }
+        .huge { font-size: 3rem; color: #fff; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h2>PROGRAM ID BRUTE-FORCER</h2>
+    <p>Testing Spin: 1000 RPM (0x64) | Temp: Cold (0x00)</p>
+    
+    <button id="connectBtn">1. CONNECT TO WASHER</button>
+    <button id="scanBtn" disabled>2. START SCANNER</button>
+    <button id="stopBtn" disabled>STOP</button>
+
+    <div class="huge" id="currentId">--</div>
+    
+    <div id="log">System Ready...<br></div>
+
+    <script>
+        const BLE_SERVICE_UUID = '0000fe60-0000-1000-8000-00805f9b34fb';
+        const BLE_CMD_CHAR = '0000fe61-0000-1000-8000-00805f9b34fb'; 
+        const BLE_AUTH_CHAR = '0000fe63-0000-1000-8000-00805f9b34fb'; 
+        
+        let bluetoothDevice, cmdCharacteristic, authCharacteristic;
+        let isScanning = false;
+        const logDiv = document.getElementById('log');
+
+        function log(msg) { logDiv.innerHTML += `> ${msg}<br>`; logDiv.scrollTop = logDiv.scrollHeight; }
+
+        document.getElementById('connectBtn').addEventListener('click', async () => {
+            try {
+                bluetoothDevice = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "U-AC" }], optionalServices: [BLE_SERVICE_UUID] });
+                const server = await bluetoothDevice.gatt.connect();
+                const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+                cmdCharacteristic = await service.getCharacteristic(BLE_CMD_CHAR);
+                authCharacteristic = await service.getCharacteristic(BLE_AUTH_CHAR);
+                
+                log("Authenticating (A3 Handshake)...");
+                await authCharacteristic.writeValueWithoutResponse(new Uint8Array([0xA3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]));
+                
+                log("CONNECTED & AUTHENTICATED.");
+                document.getElementById('scanBtn').disabled = false;
+            } catch (e) { log("Error: " + e); }
+        });
+
+        document.getElementById('scanBtn').addEventListener('click', async () => {
+            isScanning = true;
+            document.getElementById('scanBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            
+            // We will test IDs from 0x01 to 0x20 (1 to 32)
+            for (let id = 1; id <= 32; id++) {
+                if (!isScanning) break;
+
+                document.getElementById('currentId').innerText = `Testing ID: 0x${id.toString(16).toUpperCase().padStart(2, '0')}`;
+                log(`--- Testing Program ID: 0x${id.toString(16).toUpperCase().padStart(2, '0')} ---`);
+
+                // 1. Send Wake-Up Ping
+                await cmdCharacteristic.writeValueWithoutResponse(new Uint8Array([0x04, 0x06, 0x5C, 0x01, 0x01, 0x02, 0x00, 0x00]));
+                await new Promise(r => setTimeout(r, 400));
+
+                // 2. Calculate Checksum for this specific ID test
+                // Format: FF FF [ID] 00 00 00 00 00 00 [64] 00 [01] [00] 00 00 00 00 00 [CS]
+                // CS = ID + 0x64 + 0x01 + 0x00
+                let checksum = (id + 100 + 1 + 0) & 0xFF; 
+
+                // 3. Build and Send Payload
+                let payload = new Uint8Array([0xFF, 0xFF, id, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, checksum]);
+                await cmdCharacteristic.writeValueWithoutResponse(payload);
+
+                // Wait 3.5 seconds to let you read the machine's LCD screen
+                log("Watch the machine screen...");
+                await new Promise(r => setTimeout(r, 3500));
+            }
+            log("SCAN COMPLETE.");
+        });
+
+        document.getElementById('stopBtn').addEventListener('click', () => { isScanning = false; log("SCAN ABORTED."); });
+    </script>
+</body>
+</html>
