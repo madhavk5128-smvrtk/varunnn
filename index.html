@@ -47,7 +47,7 @@
                 
                 log("CONNECTED & AUTHENTICATED.");
                 document.getElementById('scanBtn').disabled = false;
-            } catch (e) { log("Error: " + e); }
+            } catch (e) { log("Error: " + e.message); }
         });
 
         document.getElementById('scanBtn').addEventListener('click', async () => {
@@ -62,22 +62,37 @@
                 document.getElementById('currentId').innerText = `Testing ID: 0x${id.toString(16).toUpperCase().padStart(2, '0')}`;
                 log(`--- Testing Program ID: 0x${id.toString(16).toUpperCase().padStart(2, '0')} ---`);
 
-                // 1. Send Wake-Up Ping
-                await cmdCharacteristic.writeValueWithoutResponse(new Uint8Array([0x04, 0x06, 0x5C, 0x01, 0x01, 0x02, 0x00, 0x00]));
-                await new Promise(r => setTimeout(r, 400));
+                try {
+                    // 1. Send Wake-Up Ping
+                    await cmdCharacteristic.writeValueWithoutResponse(new Uint8Array([0x04, 0x06, 0x5C, 0x01, 0x01, 0x02, 0x00, 0x00]));
+                    await new Promise(r => setTimeout(r, 400));
 
-                // 2. Calculate Checksum for this specific ID test
-                // Format: FF FF [ID] 00 00 00 00 00 00 [64] 00 [01] [00] 00 00 00 00 00 [CS]
-                // CS = ID + 0x64 + 0x01 + 0x00
-                let checksum = (id + 100 + 1 + 0) & 0xFF; 
+                    // 2. Calculate Checksum (ID + 100 + 1 + 0)
+                    let checksum = (id + 0x64 + 0x01 + 0x00) & 0xFF; 
 
-                // 3. Build and Send Payload
-                let payload = new Uint8Array([0xFF, 0xFF, id, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, checksum]);
-                await cmdCharacteristic.writeValueWithoutResponse(payload);
+                    // 3. Build EXACT 20-byte Payload
+                    let payload = new Uint8Array([
+                        0xFF, 0xFF, // 0, 1: Header
+                        id,         // 2: Program ID
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 3-8: Padding (6 bytes)
+                        0x64,       // 9: Spin (1000 RPM)
+                        0x00,       // 10: Reserved
+                        0x01,       // 11: Step
+                        0x00,       // 12: Temp (Cold)
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 13-18: Padding (6 bytes)
+                        checksum    // 19: Checksum
+                    ]);
+                    
+                    await cmdCharacteristic.writeValueWithoutResponse(payload);
 
-                // Wait 3.5 seconds to let you read the machine's LCD screen
-                log("Watch the machine screen...");
-                await new Promise(r => setTimeout(r, 3500));
+                    // Wait 3.5 seconds to let you read the machine's LCD screen
+                    log("Watch the machine screen...");
+                    await new Promise(r => setTimeout(r, 3500));
+                } catch (err) {
+                    log(`ERROR on ID 0x${id.toString(16).toUpperCase()}: ${err.message}`);
+                    log("Waiting 2 seconds to recover...");
+                    await new Promise(r => setTimeout(r, 2000));
+                }
             }
             log("SCAN COMPLETE.");
         });
